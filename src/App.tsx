@@ -1,412 +1,547 @@
-import { useState, useEffect, useRef } from "react";
-import { Modal } from "@playground/Modal";
-import { Tabs, TabList, Tab, TabPanel } from "@playground/Tabs";
-import { Disclosure } from "@playground/Disclosure";
-
-// shadcn reference components
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Header } from './components/Header';
+import { StatsBar } from './components/StatsBar';
+import { TaskCard } from './components/TaskCard';
+import { FocusTimer } from './components/FocusTimer';
+import { PlanGeneratorModal } from './components/PlanGeneratorModal';
+import { ActiveRecallModal } from './components/ActiveRecallModal';
+import { ApiKeyModal } from './components/ApiKeyModal';
+import { A11yProvider, useA11y } from './components/A11yAnnouncer';
 import {
-  Dialog as ShadcnDialog,
-  DialogContent as ShadcnDialogContent,
-  DialogDescription as ShadcnDialogDescription,
-  DialogHeader as ShadcnDialogHeader,
-  DialogTitle as ShadcnDialogTitle,
-  DialogTrigger as ShadcnDialogTrigger,
-} from "@/components/ui/dialog";
+  StudyPlan,
+  StudyTask,
+  AIProviderConfig,
+  TimerMode
+} from './types';
 import {
-  Tabs as ShadcnTabs,
-  TabsContent as ShadcnTabsContent,
-  TabsList as ShadcnTabsList,
-  TabsTrigger as ShadcnTabsTrigger,
-} from "@/components/ui/tabs";
+  loadPlans,
+  savePlans,
+  loadActivePlanId,
+  saveActivePlanId,
+  loadAIConfig,
+  saveAIConfig,
+  loadStats,
+  saveStats,
+  UserStats
+} from './services/storageService';
+import {
+  Plus,
+  BookOpen,
+  Sparkles,
+  ShieldCheck,
+  Code2,
+  Cpu
+} from 'lucide-react';
 
-export function App() {
-  // Hand-built Modal state
-  const [isHandbuiltModalOpen, setIsHandbuiltModalOpen] = useState(false);
-  const [modalFeedback, setModalFeedback] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
+const TIMER_DURATIONS: Record<TimerMode, number> = {
+  pomodoro: 25 * 60,
+  shortBreak: 5 * 60,
+  longBreak: 15 * 60
+};
 
-  // Active element focus inspector for a11y testing
-  const [activeElementInfo, setActiveElementInfo] = useState<string>("None");
+// Web Audio API Synthesizer Chime (Zero external audio file dependency, zero 404s)
+function playGentleChime() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
-  useEffect(() => {
-    const updateActiveElement = () => {
-      const el = document.activeElement;
-      if (!el) {
-        setActiveElementInfo("None");
-        return;
-      }
-      const tag = el.tagName.toLowerCase();
-      const id = el.id ? `#${el.id}` : "";
-      const role = el.getAttribute("role") ? `[role="${el.getAttribute("role")}"]` : "";
-      const text = (el.textContent || "").trim().slice(0, 20);
-      setActiveElementInfo(`${tag}${id}${role} ("${text}")`);
-    };
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3); // A5
 
-    document.addEventListener("focusin", updateActiveElement);
-    document.addEventListener("keyup", updateActiveElement);
-    return () => {
-      document.removeEventListener("focusin", updateActiveElement);
-      document.removeEventListener("keyup", updateActiveElement);
-    };
-  }, []);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
 
-  return (
-    <div className="max-w-6xl mx-auto px-4 py-10 space-y-12">
-      {/* Header */}
-      <header className="border-b border-slate-200 pb-6">
-        <div className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold tracking-wide uppercase mb-2">
-          FE-05 · Foundations
-        </div>
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-          Accessible Component Fundamentals Playground
-        </h1>
-        <p className="mt-2 text-slate-600 max-w-3xl">
-          Three interactive W3C WAI-ARIA APG compliant components constructed strictly from scratch
-          using plain React + TypeScript, side-by-side with shadcn/ui (Radix Primitives) for structural gap analysis.
-        </p>
-
-        {/* Live A11y Focus Inspector */}
-        <div className="mt-4 p-3 bg-slate-900 text-slate-200 rounded-lg flex items-center justify-between text-xs font-mono shadow-inner">
-          <span className="text-emerald-400 font-semibold flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Active Focus:
-          </span>
-          <span className="truncate max-w-md">{activeElementInfo}</span>
-        </div>
-      </header>
-
-      {/* SECTION 1: MODAL DIALOG */}
-      <section className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
-        <div className="flex items-start justify-between flex-wrap gap-4">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              1. Modal Dialog (W3C APG Pattern)
-            </h2>
-            <p className="text-sm text-slate-500 mt-1">
-              Features focus trapping (<kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Tab</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Shift+Tab</kbd>), focus restoration to opening trigger, and <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Escape</kbd> key dismissal.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium px-2.5 py-1 bg-green-100 text-green-800 rounded-full">
-              Zero External Libraries
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Hand-built version */}
-          <div className="p-5 rounded-lg border-2 border-blue-200 bg-blue-50/30 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-blue-900 text-sm">
-                Hand-Built Implementation
-              </span>
-              <span className="text-xs bg-blue-200 text-blue-900 px-2 py-0.5 rounded font-mono">
-                playground/Modal.tsx
-              </span>
-            </div>
-
-            <p className="text-xs text-slate-600">
-              Click open or focus with keyboard and press <kbd className="font-mono bg-white px-1 border rounded">Space</kbd> or <kbd className="font-mono bg-white px-1 border rounded">Enter</kbd>. Notice focus returns here when closed.
-            </p>
-
-            <button
-              type="button"
-              id="handbuilt-modal-trigger-btn"
-              onClick={() => setIsHandbuiltModalOpen(true)}
-              className="px-4 py-2 bg-blue-600 text-white font-medium text-sm rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 transition-colors shadow-sm"
-            >
-              Open Hand-Built Modal
-            </button>
-
-            {modalFeedback && (
-              <p className="text-xs text-emerald-700 font-medium">
-                Last submitted: {modalFeedback}
-              </p>
-            )}
-
-            <Modal
-              isOpen={isHandbuiltModalOpen}
-              onClose={() => setIsHandbuiltModalOpen(false)}
-              title="Accessible Preferences Modal"
-              description="This dialog implements the W3C APG Modal pattern with strict focus trapping."
-              initialFocusRef={inputRef}
-            >
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setModalFeedback("Preferences saved!");
-                  setIsHandbuiltModalOpen(false);
-                }}
-                className="space-y-4"
-              >
-                <div>
-                  <label
-                    htmlFor="username-input"
-                    className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1"
-                  >
-                    Display Name (Initial Focus)
-                  </label>
-                  <input
-                    ref={inputRef}
-                    id="username-input"
-                    type="text"
-                    defaultValue="Jane Doe"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="notify-select"
-                    className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1"
-                  >
-                    Notification Frequency
-                  </label>
-                  <select
-                    id="notify-select"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 bg-white"
-                  >
-                    <option>Daily Digest</option>
-                    <option>Weekly Summary</option>
-                    <option>Real-Time</option>
-                  </select>
-                </div>
-
-                <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setIsHandbuiltModalOpen(false)}
-                    className="px-3.5 py-1.5 text-sm text-slate-700 hover:bg-slate-100 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 text-sm bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-1"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </form>
-            </Modal>
-          </div>
-
-          {/* shadcn version */}
-          <div className="p-5 rounded-lg border border-slate-200 bg-slate-50 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-800 text-sm">
-                shadcn / Radix Benchmark
-              </span>
-              <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono">
-                components/ui/dialog.tsx
-              </span>
-            </div>
-
-            <p className="text-xs text-slate-600">
-              Benchmark implementation using Radix Dialog Primitive. Uses document.body portal, scroll locking padding injection, and inert sibling hiding.
-            </p>
-
-            <ShadcnDialog>
-              <ShadcnDialogTrigger asChild>
-                <button
-                  type="button"
-                  id="shadcn-dialog-trigger-btn"
-                  className="px-4 py-2 bg-slate-900 text-white font-medium text-sm rounded-lg hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 transition-colors shadow-sm"
-                >
-                  Open shadcn Dialog
-                </button>
-              </ShadcnDialogTrigger>
-              <ShadcnDialogContent>
-                <ShadcnDialogHeader>
-                  <ShadcnDialogTitle>shadcn / Radix Dialog</ShadcnDialogTitle>
-                  <ShadcnDialogDescription>
-                    Inspected source uses @radix-ui/react-dialog with portal rendering and automatic inert application on root siblings.
-                  </ShadcnDialogDescription>
-                </ShadcnDialogHeader>
-                <div className="space-y-3 py-2 text-sm text-slate-700">
-                  <p>
-                    Notice how this modal is injected into a Portal at <code className="bg-slate-100 px-1 py-0.5 rounded text-xs">&lt;body&gt;</code> rather than residing within the local React component subtree.
-                  </p>
-                  <input
-                    type="text"
-                    placeholder="Focusable test input inside Radix..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
-                  />
-                </div>
-              </ShadcnDialogContent>
-            </ShadcnDialog>
-          </div>
-        </div>
-      </section>
-
-      {/* SECTION 2: TABS */}
-      <section className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">
-            2. Accessible Tabs (W3C APG Pattern)
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Features roving tabindex (<code className="text-xs font-mono">tabIndex=0</code> on active tab, <code className="text-xs font-mono">-1</code> on inactive tabs). Navigate between tabs using <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">ArrowLeft</kbd> and <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">ArrowRight</kbd> (or <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Home</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">End</kbd>). Pressing <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Tab</kbd> moves directly into the tabpanel.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Hand-built Tabs */}
-          <div className="p-5 rounded-lg border-2 border-blue-200 bg-blue-50/30 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-blue-900 text-sm">
-                Hand-Built Tabs (Roving Tabindex)
-              </span>
-              <span className="text-xs bg-blue-200 text-blue-900 px-2 py-0.5 rounded font-mono">
-                playground/Tabs.tsx
-              </span>
-            </div>
-
-            <Tabs defaultValue="overview">
-              <TabList aria-label="Project Sections">
-                <Tab value="overview">Overview</Tab>
-                <Tab value="specs">ARIA Spec</Tab>
-                <Tab value="keyboard">Keyboard Map</Tab>
-              </TabList>
-
-              <TabPanel value="overview">
-                <h4 className="font-semibold text-sm text-slate-900 mb-1">
-                  Accessible Fundamentals Overview
-                </h4>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Screen readers announce the active tab and its position (e.g. "Tab 1 of 3"). Only the active tab is in the natural tab order.
-                </p>
-              </TabPanel>
-
-              <TabPanel value="specs">
-                <h4 className="font-semibold text-sm text-slate-900 mb-1">
-                  ARIA Contract Verified
-                </h4>
-                <ul className="text-xs text-slate-600 list-disc list-inside space-y-1">
-                  <li><code>role="tablist"</code> with <code>aria-orientation="horizontal"</code></li>
-                  <li><code>role="tab"</code> with dynamic <code>aria-selected</code></li>
-                  <li><code>role="tabpanel"</code> with <code>tabIndex={0}</code> for keyboard scrolling</li>
-                </ul>
-              </TabPanel>
-
-              <TabPanel value="keyboard">
-                <h4 className="font-semibold text-sm text-slate-900 mb-1">
-                  Supported Key Sequences
-                </h4>
-                <p className="text-xs text-slate-600">
-                  Left/Right arrow cycles between tabs with boundary wraparound. Home jumps to first tab; End jumps to last tab.
-                </p>
-              </TabPanel>
-            </Tabs>
-          </div>
-
-          {/* shadcn Tabs */}
-          <div className="p-5 rounded-lg border border-slate-200 bg-slate-50 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-800 text-sm">
-                shadcn / Radix Benchmark
-              </span>
-              <span className="text-xs bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono">
-                components/ui/tabs.tsx
-              </span>
-            </div>
-
-            <ShadcnTabs defaultValue="account">
-              <ShadcnTabsList>
-                <ShadcnTabsTrigger value="account">Account</ShadcnTabsTrigger>
-                <ShadcnTabsTrigger value="security">Security</ShadcnTabsTrigger>
-                <ShadcnTabsTrigger value="billing">Billing</ShadcnTabsTrigger>
-              </ShadcnTabsList>
-              <ShadcnTabsContent value="account" className="text-xs text-slate-600 p-2">
-                Manage your account profile settings and contact details.
-              </ShadcnTabsContent>
-              <ShadcnTabsContent value="security" className="text-xs text-slate-600 p-2">
-                Configure two-factor authentication and active sessions.
-              </ShadcnTabsContent>
-              <ShadcnTabsContent value="billing" className="text-xs text-slate-600 p-2">
-                Review subscription invoices and payment methods.
-              </ShadcnTabsContent>
-            </ShadcnTabs>
-          </div>
-        </div>
-      </section>
-
-      {/* SECTION 3: DISCLOSURE */}
-      <section className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">
-            3. Disclosure (W3C APG Pattern)
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Built using a native <code className="text-xs font-mono">&lt;button&gt;</code> trigger with <code className="text-xs font-mono">aria-expanded</code> and <code className="text-xs font-mono">aria-controls</code> linking to the controlled region. Press <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Enter</kbd> or <kbd className="px-1.5 py-0.5 bg-slate-100 border rounded text-xs">Space</kbd> to toggle.
-          </p>
-        </div>
-
-        <div className="space-y-3 max-w-2xl">
-          <Disclosure
-            title="What is the difference between a Disclosure and an Accordion?"
-            defaultExpanded={true}
-          >
-            A disclosure controls the visibility of a single section of content. An accordion is typically a composite grouping of multiple disclosures where opening one may optionally collapse others. Both rely on the same fundamental <code>aria-expanded</code> and <code>aria-controls</code> attributes.
-          </Disclosure>
-
-          <Disclosure
-            title="Why must the trigger be a native <button> element?"
-          >
-            Native buttons have built-in keyboard operability (responding to both <kbd className="font-mono bg-slate-100 px-1 border rounded text-xs">Enter</kbd> and <kbd className="font-mono bg-slate-100 px-1 border rounded text-xs">Space</kbd>), are inherently focusable without custom <code>tabindex</code> hacks, and report their role correctly to assistive technologies without needing manual ARIA overrides.
-          </Disclosure>
-
-          <Disclosure
-            title="How does focus flow when the disclosure is expanded?"
-          >
-            When a disclosure is expanded, pressing <kbd className="font-mono bg-slate-100 px-1 border rounded text-xs">Tab</kbd> naturally advances focus to the next focusable item inside the disclosed region (or the next item in document order if the region has no focusable elements). Focus should never be forcefully hijacked on disclosure open.
-          </Disclosure>
-        </div>
-      </section>
-
-      {/* SECTION 4: KEYBOARD VERIFICATION CHECKLIST */}
-      <section className="bg-slate-900 text-white rounded-xl p-6 shadow-md space-y-4">
-        <h3 className="text-lg font-bold flex items-center gap-2">
-          <span>⌨️</span> Keyboard Navigation Verification Matrix
-        </h3>
-        <p className="text-xs text-slate-300">
-          You can test this entire page without touching your mouse. Confirm every requirement passes:
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-          <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 space-y-2">
-            <h4 className="font-semibold text-blue-400">Modal Dialog</h4>
-            <ul className="space-y-1 text-slate-300">
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">Tab</kbd> traps inside modal loop</li>
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">Shift+Tab</kbd> reverse traps</li>
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">Escape</kbd> dismisses modal</li>
-              <li>✓ Focus returns to opening trigger</li>
-            </ul>
-          </div>
-
-          <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 space-y-2">
-            <h4 className="font-semibold text-emerald-400">Tabs</h4>
-            <ul className="space-y-1 text-slate-300">
-              <li>✓ Only selected tab has <code className="text-emerald-300">tabIndex=0</code></li>
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">←</kbd> / <kbd className="bg-slate-700 px-1 rounded">→</kbd> navigate with wraparound</li>
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">Home</kbd> / <kbd className="bg-slate-700 px-1 rounded">End</kbd> go to boundaries</li>
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">Tab</kbd> moves directly into panel</li>
-            </ul>
-          </div>
-
-          <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 space-y-2">
-            <h4 className="font-semibold text-amber-400">Disclosure</h4>
-            <ul className="space-y-1 text-slate-300">
-              <li>✓ <kbd className="bg-slate-700 px-1 rounded">Space</kbd> / <kbd className="bg-slate-700 px-1 rounded">Enter</kbd> toggles open/close</li>
-              <li>✓ <code className="text-amber-300">aria-expanded</code> updates accurately</li>
-              <li>✓ Panel linked with <code className="text-amber-300">aria-controls</code></li>
-              <li>✓ Hidden attribute prevents virtual cursor reading</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 1.2);
+  } catch {
+    // Audio might be blocked by browser autoplay policy before user gesture
+  }
 }
 
-export default App;
+export const StudyFlowApp: React.FC = () => {
+  const { announce } = useA11y();
+
+  // Core App State
+  const [plans, setPlans] = useState<StudyPlan[]>(() => loadPlans());
+  const [activePlanId, setActivePlanId] = useState<string>(() => {
+    const saved = loadActivePlanId();
+    const loaded = loadPlans();
+    if (saved && loaded.some((p) => p.id === saved)) return saved;
+    return loaded[0]?.id || '';
+  });
+
+  const [aiConfig, setAiConfig] = useState<AIProviderConfig>(() => loadAIConfig());
+  const [stats, setStats] = useState<UserStats>(() => loadStats());
+
+  // Dark Mode
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const saved = localStorage.getItem('studyflow_dark_theme');
+    if (saved !== null) return saved === 'true';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  // Modals
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isQuizModalOpen, setIsQuizModalOpen] = useState(false);
+  const [quizTask, setQuizTask] = useState<StudyTask | null>(null);
+
+  // Filter & Search
+  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'high'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Pomodoro Focus Timer State
+  const [timerMode, setTimerMode] = useState<TimerMode>('pomodoro');
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(TIMER_DURATIONS.pomodoro);
+  const [totalSeconds, setTotalSeconds] = useState<number>(TIMER_DURATIONS.pomodoro);
+  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+  const [activeFocusTaskId, setActiveFocusTaskId] = useState<string | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Sync Dark mode to document
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('studyflow_dark_theme', darkMode ? 'true' : 'false');
+  }, [darkMode]);
+
+  // Persist Plans and Active ID
+  useEffect(() => {
+    savePlans(plans);
+  }, [plans]);
+
+  useEffect(() => {
+    if (activePlanId) saveActivePlanId(activePlanId);
+  }, [activePlanId]);
+
+  useEffect(() => {
+    saveAIConfig(aiConfig);
+  }, [aiConfig]);
+
+  useEffect(() => {
+    saveStats(stats);
+  }, [stats]);
+
+  // Current Active Plan
+  const activePlan = useMemo(() => {
+    return plans.find((p) => p.id === activePlanId) || plans[0] || null;
+  }, [plans, activePlanId]);
+
+  // Active Task for Timer
+  const activeFocusTask = useMemo(() => {
+    if (!activePlan || !activeFocusTaskId) return null;
+    return activePlan.tasks.find((t) => t.id === activeFocusTaskId) || null;
+  }, [activePlan, activeFocusTaskId]);
+
+  // Timer Tick Engine
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    if (isTimerRunning) {
+      interval = setInterval(() => {
+        setSecondsRemaining((prev) => {
+          if (prev <= 1) {
+            // Timer expired!
+            if (soundEnabled) playGentleChime();
+
+            if (timerMode === 'pomodoro') {
+              announce('Pomodoro session completed! Great focus. Take a 5-minute break or test recall.', 'assertive');
+              setStats((s) => ({
+                ...s,
+                completedPomodoros: s.completedPomodoros + 1,
+                totalStudyMinutes: s.totalStudyMinutes + 25
+              }));
+
+              // If an active task is selected, trigger recall prompt
+              if (activeFocusTask) {
+                setQuizTask(activeFocusTask);
+                setIsQuizModalOpen(true);
+              }
+
+              // Switch to short break
+              setTimerMode('shortBreak');
+              setTotalSeconds(TIMER_DURATIONS.shortBreak);
+              return TIMER_DURATIONS.shortBreak;
+            } else {
+              announce('Break completed! Ready to begin next focus session.', 'assertive');
+              setTimerMode('pomodoro');
+              setTotalSeconds(TIMER_DURATIONS.pomodoro);
+              return TIMER_DURATIONS.pomodoro;
+            }
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isTimerRunning, timerMode, soundEnabled, activeFocusTask, announce]);
+
+  // Filtered Tasks
+  const filteredTasks = useMemo(() => {
+    if (!activePlan) return [];
+    return activePlan.tasks.filter((task) => {
+      // Filter tab
+      if (filter === 'pending' && task.completed) return false;
+      if (filter === 'completed' && !task.completed) return false;
+      if (filter === 'high' && task.priority !== 'high') return false;
+
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const inTitle = task.title.toLowerCase().includes(q);
+        const inDesc = task.description.toLowerCase().includes(q);
+        const inRecall = task.activeRecall.some((r) => r.question.toLowerCase().includes(q));
+        if (!inTitle && !inDesc && !inRecall) return false;
+      }
+
+      return true;
+    });
+  }, [activePlan, filter, searchQuery]);
+
+  // Task Actions
+  const handleToggleComplete = useCallback(
+    (taskId: string) => {
+      if (!activePlan) return;
+      let newlyCompleted = false;
+
+      const updatedTasks = activePlan.tasks.map((t) => {
+        if (t.id === taskId) {
+          newlyCompleted = !t.completed;
+          return { ...t, completed: !t.completed };
+        }
+        return t;
+      });
+
+      const updatedPlan = { ...activePlan, tasks: updatedTasks };
+      setPlans((prev) => prev.map((p) => (p.id === activePlan.id ? updatedPlan : p)));
+
+      if (newlyCompleted) {
+        announce('Task marked as completed! Excellent progress.', 'polite');
+        setStats((s) => ({ ...s, completedTasksCount: s.completedTasksCount + 1 }));
+      } else {
+        announce('Task marked as incomplete.', 'polite');
+      }
+    },
+    [activePlan, announce]
+  );
+
+  const handleDeleteTask = useCallback(
+    (taskId: string) => {
+      if (!activePlan) return;
+      const updatedTasks = activePlan.tasks.filter((t) => t.id !== taskId);
+      const updatedPlan = { ...activePlan, tasks: updatedTasks };
+      setPlans((prev) => prev.map((p) => (p.id === activePlan.id ? updatedPlan : p)));
+      if (activeFocusTaskId === taskId) {
+        setActiveFocusTaskId(null);
+      }
+      announce('Task removed from study plan.', 'polite');
+    },
+    [activePlan, activeFocusTaskId, announce]
+  );
+
+  const handleStartFocus = useCallback(
+    (task: StudyTask) => {
+      setActiveFocusTaskId(task.id);
+      setTimerMode('pomodoro');
+      setTotalSeconds(TIMER_DURATIONS.pomodoro);
+      setSecondsRemaining(TIMER_DURATIONS.pomodoro);
+      setIsTimerRunning(true);
+      announce(`Focus session started for ${task.title}. 25-minute timer running.`, 'polite');
+    },
+    [announce]
+  );
+
+  const handleOpenQuiz = useCallback((task: StudyTask) => {
+    setQuizTask(task);
+    setIsQuizModalOpen(true);
+  }, []);
+
+  const handleTimerModeSelect = useCallback(
+    (mode: TimerMode) => {
+      setTimerMode(mode);
+      const dur = TIMER_DURATIONS[mode];
+      setTotalSeconds(dur);
+      setSecondsRemaining(dur);
+      setIsTimerRunning(false);
+      announce(`Timer set to ${mode === 'pomodoro' ? '25-minute focus session' : 'break session'}.`, 'polite');
+    },
+    [announce]
+  );
+
+  const handlePlanCreated = useCallback(
+    (newPlan: StudyPlan) => {
+      setPlans((prev) => [newPlan, ...prev]);
+      setActivePlanId(newPlan.id);
+      announce(`New AI study plan created: ${newPlan.title}. ${newPlan.tasks.length} tasks ready.`, 'polite');
+    },
+    [announce]
+  );
+
+  const timerDisplayFormatted = `${Math.floor(secondsRemaining / 60)
+    .toString()
+    .padStart(2, '0')}:${(secondsRemaining % 60).toString().padStart(2, '0')}`;
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
+      {/* Accessible Header */}
+      <Header
+        plans={plans}
+        activePlan={activePlan}
+        onSelectPlan={(id) => {
+          setActivePlanId(id);
+          const p = plans.find((x) => x.id === id);
+          if (p) announce(`Switched active plan to ${p.subject}: ${p.targetGoal}`, 'polite');
+        }}
+        onOpenNewPlanModal={() => setIsPlanModalOpen(true)}
+        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        aiConfig={aiConfig}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
+        timerRunning={isTimerRunning}
+        timerDisplay={timerDisplayFormatted}
+      />
+
+      {/* Main Content Landmark */}
+      <main id="main-content" tabIndex={-1} className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 focus:outline-none">
+        {activePlan ? (
+          <>
+            {/* Top Stats & Filters Section */}
+            <StatsBar
+              plan={activePlan}
+              filter={filter}
+              onFilterChange={setFilter}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              pomodoroCount={stats.completedPomodoros}
+            />
+
+            {/* Layout Grid: Tasks (Left) + Focus Timer (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+              {/* Task List Column (2 cols on large screen) */}
+              <section aria-label="Structured Micro-Tasks" className="lg:col-span-2 space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Curriculum Tasks
+                    </h2>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      {filteredTasks.length}
+                    </span>
+                  </div>
+
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    Arranged by cognitive sequence
+                  </span>
+                </div>
+
+                {filteredTasks.length === 0 ? (
+                  <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                    <BookOpen className="w-10 h-10 mx-auto text-slate-400" />
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      No matching tasks found
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                      {searchQuery
+                        ? `No tasks match the keyword "${searchQuery}". Clear your search query to see all items.`
+                        : 'All tasks under this filter are caught up! Switch filters or generate another AI plan.'}
+                    </p>
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        Clear Search Filter
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        isTimerActive={activeFocusTaskId === task.id}
+                        onToggleComplete={handleToggleComplete}
+                        onStartFocus={handleStartFocus}
+                        onOpenQuiz={handleOpenQuiz}
+                        onDeleteTask={handleDeleteTask}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Sidebar: Pomodoro Focus Timer */}
+              <div className="lg:col-span-1 space-y-6">
+                <FocusTimer
+                  activeTask={activeFocusTask}
+                  mode={timerMode}
+                  secondsRemaining={secondsRemaining}
+                  totalSeconds={totalSeconds}
+                  isRunning={isTimerRunning}
+                  pomodoroCount={stats.completedPomodoros}
+                  soundEnabled={soundEnabled}
+                  onToggleSound={() => setSoundEnabled(!soundEnabled)}
+                  onStart={() => {
+                    setIsTimerRunning(true);
+                    announce('Timer started.', 'polite');
+                  }}
+                  onPause={() => {
+                    setIsTimerRunning(false);
+                    announce('Timer paused.', 'polite');
+                  }}
+                  onReset={() => {
+                    setIsTimerRunning(false);
+                    const dur = TIMER_DURATIONS[timerMode];
+                    setSecondsRemaining(dur);
+                    announce('Timer reset.', 'polite');
+                  }}
+                  onSkip={() => {
+                    const nextMode: TimerMode = timerMode === 'pomodoro' ? 'shortBreak' : 'pomodoro';
+                    handleTimerModeSelect(nextMode);
+                  }}
+                  onSelectMode={handleTimerModeSelect}
+                  onOpenRecallForActiveTask={() => {
+                    if (activeFocusTask) handleOpenQuiz(activeFocusTask);
+                  }}
+                />
+
+                {/* Cognitive Architecture Card */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-sm text-xs space-y-2.5">
+                  <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-white">
+                    <Cpu className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span>Evidence-Based Cognitive Design</span>
+                  </div>
+                  <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
+                    StudyFlow AI applies <strong>Spaced Retrieval Practice</strong> and <strong>Cognitive Task Chunking</strong>:
+                  </p>
+                  <ul className="space-y-1.5 text-slate-600 dark:text-slate-400 list-disc list-inside">
+                    <li>25-min high-intensity focus sprints</li>
+                    <li>Immediate active recall self-drilling</li>
+                    <li>Roving tabindex & full keyboard control (FE-05)</li>
+                    <li>Structured JSON validation & safe fallback (FE-07)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="p-16 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-4 max-w-lg mx-auto mt-12">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/80 flex items-center justify-center text-indigo-600 dark:text-indigo-400 mx-auto">
+              <Sparkles className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+              No Study Plans Yet
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Create your first AI-engineered study curriculum with custom micro-tasks and active recall questions.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsPlanModalOpen(true)}
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-5 py-3 rounded-xl shadow-md shadow-indigo-600/30 transition active:scale-95"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create First AI Study Plan</span>
+            </button>
+          </div>
+        )}
+      </main>
+
+      {/* Production Footer (FE-11) */}
+      <footer
+        role="contentinfo"
+        className="w-full border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 text-xs text-slate-500 dark:text-slate-400 transition-colors mt-12"
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-slate-800 dark:text-slate-200">
+              StudyFlow AI
+            </span>
+            <span>•</span>
+            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              WCAG 2.1 AA Compliant
+            </span>
+            <span>•</span>
+            <span>Week 8 Production Capstone</span>
+          </div>
+
+          <div className="flex items-center gap-4 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setIsSettingsModalOpen(true)}
+              className="hover:text-indigo-600 dark:hover:text-indigo-400 underline"
+            >
+              AI Engine Settings
+            </button>
+            <a
+              href="https://github.com/safuan36/accessible-components-fe05"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-indigo-600 dark:hover:text-indigo-400 flex items-center gap-1"
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Repository</span>
+            </a>
+          </div>
+        </div>
+      </footer>
+
+      {/* Modals */}
+      <PlanGeneratorModal
+        isOpen={isPlanModalOpen}
+        onClose={() => setIsPlanModalOpen(false)}
+        onPlanCreated={handlePlanCreated}
+        aiConfig={aiConfig}
+        onOpenSettings={() => {
+          setIsPlanModalOpen(false);
+          setIsSettingsModalOpen(true);
+        }}
+      />
+
+      <ActiveRecallModal
+        task={quizTask}
+        isOpen={isQuizModalOpen}
+        onClose={() => {
+          setIsQuizModalOpen(false);
+          setQuizTask(null);
+        }}
+        onCompleteTask={handleToggleComplete}
+        aiConfig={aiConfig}
+      />
+
+      <ApiKeyModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        config={aiConfig}
+        onSaveConfig={(newConfig) => {
+          setAiConfig(newConfig);
+          announce(`AI Engine updated to ${newConfig.provider.toUpperCase()}.`, 'polite');
+        }}
+      />
+    </div>
+  );
+};
+
+export default function App() {
+  return (
+    <A11yProvider>
+      <StudyFlowApp />
+    </A11yProvider>
+  );
+}
